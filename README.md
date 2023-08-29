@@ -14,9 +14,10 @@ $ git lfs pull # to download the trained resnet model
 
 ## Quickstart
 
-> Check out: `notebooks/analyzed_trained_networks.ipynb`
+Check out: `notebooks/analyzed_trained_networks.ipynb`
 
 ## Dataset
 
-[https://storage.googleapis.com/rdyro_temp/xplane_all/](https://storage.googleapis.com/rdyro_temp/xplane_all/)
+`https://storage.googleapis.com/rdyro_temp/xplane_all/*`
 
+> Use `gsutil`
