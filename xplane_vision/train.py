@@ -19,32 +19,12 @@ from torchvision.models.resnet import (
     resnet152,
 )
 from torch.utils.data import DataLoader
-from torchvision import transforms as T
-from torch.multiprocessing import set_start_method
 
-from batch_dataloader import BatchReadXPlaneVideoDataset, BatchReadXPlaneDataLoader
-from random_access_dataloader import RandomAccessXPlaneVideoDataset
-from utils import process_videos
+from .random_access_dataloader import RandomAccessXPlaneVideoDataset
+from .utils import process_videos
+from . import transform_eval, transform_train
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-transform_train = T.Compose(
-    [
-        T.Lambda(lambda x: torch.as_tensor(x).cuda()),
-        T.Lambda(lambda x: x.transpose(-3, -1)),
-        T.RandomRotation(10),
-        T.ColorJitter(1.0, 1.0, 1.0, 0.5),
-        T.Resize((640, 480)),
-    ]
-)
-
-transform_eval = T.Compose(
-    [
-        T.Lambda(lambda x: torch.as_tensor(x).cuda()),
-        T.Lambda(lambda x: x.transpose(-3, -1)),
-        T.Resize((640, 480)),
-    ]
-)
 
 
 def custom_collate_fn(batch, train: bool = True):
@@ -60,43 +40,26 @@ def custom_collate_fn(batch, train: bool = True):
 
 
 def train(config):
-    #files = list(glob(str(Path("~/datasets/xplane_recording4/*.avi").expanduser()))) + list(
+    # files = list(glob(str(Path("~/datasets/xplane_recording4/*.avi").expanduser()))) + list(
     #    glob(str(Path("~/datasets/xplane_recording5/*.avi").expanduser()))
-    #)
+    # )
     files = list(glob(str(Path("~/datasets/*avi").expanduser())))
     process_videos(files)
     files = [Path(f).with_suffix(".mp4") for f in files]
-    if config["dataset"] == "batched":
-        ds = BatchReadXPlaneVideoDataset(
-            files,
-            transform=transform_train,
-            skip_start_frames=120,
-            skip_end_frames=60,
-            frame_skip_n=10,
-            video_batch_size=20,
-        )
-        dl = BatchReadXPlaneDataLoader(
-            ds,
-            batch_size=config["batch_size"],
-            num_workers=0,
-            shuffle=False,
-            collate_fn=custom_collate_fn,
-        )
-    else:
-        ds = RandomAccessXPlaneVideoDataset(
-            files,
-            transform=None,
-            skip_start_frames=120,
-            skip_end_frames=60,
-            frame_skip_n=10,
-        )
-        dl = DataLoader(
-            ds,
-            batch_size=config["batch_size"],
-            num_workers=16,
-            shuffle=True,
-            collate_fn=lambda x: x,
-        )
+    ds = RandomAccessXPlaneVideoDataset(
+        files,
+        transform=None,
+        skip_start_frames=120,
+        skip_end_frames=60,
+        frame_skip_n=10,
+    )
+    dl = DataLoader(
+        ds,
+        batch_size=config["batch_size"],
+        num_workers=16,
+        shuffle=True,
+        collate_fn=lambda x: x,  # need to collate in the master process using CUDA
+    )
     model = resnet50(pretrained=False)
     model.fc = nn.Linear(model.fc.weight.shape[-1], 3)
     model.conv1 = nn.Sequential(nn.BatchNorm2d(3), model.conv1)
@@ -157,7 +120,9 @@ def train(config):
         torch.save(model.state_dict(), checkpoint_dir / "model.pt")
         torch.save(optimizer.state_dict(), checkpoint_dir / "optimizer.pt")
         torch.save(epoch, checkpoint_dir / "epoch.pt")
-        session.report(metrics=dict(epoch=epoch), checkpoint=Checkpoint.from_directory(str(checkpoint_dir)))
+        session.report(
+            metrics=dict(epoch=epoch), checkpoint=Checkpoint.from_directory(str(checkpoint_dir))
+        )
 
         # eval loss
         model.eval()
@@ -182,20 +147,12 @@ def train(config):
 
 if __name__ == "__main__":
     best_config = {
-        # "dataset": "random_access",
-        # "batch_size": tune.choice([32]),
-        # "lr": tune.choice([1e-4, 1e-5]),
-        # "lr_step": tune.choice([0.3, 1.0]),
-        # "opt": tune.choice(["Adam", "SGD"]),
         "dataset": "random_access",
         "batch_size": tune.choice([32]),
         "lr": tune.choice([3e-4]),
         "lr_step": tune.choice([1.0]),
         "opt": tune.choice(["Adam"]),
     }
-    # train(
-    #    {"dataset": "random_access", "batch_size": 16, "lr": 0.0001, "lr_step": 0.3, "opt": "Adam"}
-    # )
 
     experiment = tune.Experiment(
         "training_xplane_new6",
@@ -203,22 +160,5 @@ if __name__ == "__main__":
         config=best_config,
         resources_per_trial={"gpu": 1, "cpu": 16},
         num_samples=50,
-    )
-    tune.run_experiments(experiment, resume="AUTO")
-
-if False and __name__ == "__main__":
-    config = {
-        "lr": tune.choice([3e-4, 1e-4, 3e-5, 1e-5]),
-        # "opt": tune.choice(["Adam", "SGD"]),
-        "opt": tune.choice(["Adam"]),
-        "lr_step": tune.choice([1.0, 0.3]),
-        "batch_size": tune.choice([8, 16, 32]),
-    }
-    experiment = tune.Experiment(
-        "training_xplane4",
-        train,
-        config=config,
-        resources_per_trial={"gpu": 1},
-        num_samples=20,
     )
     tune.run_experiments(experiment, resume="AUTO")

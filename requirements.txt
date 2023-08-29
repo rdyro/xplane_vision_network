@@ -1,0 +1,6 @@
+torch
+ray
+tqdm
+torchvision
+jaxm
+git+https://github.com/rdyro/jfi-JAXFriendlyInterface

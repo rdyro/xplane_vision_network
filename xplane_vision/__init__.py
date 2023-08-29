@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import sys
 from typing import Callable
 from pathlib import Path
 import json
@@ -11,12 +10,6 @@ from torch import nn, Tensor
 from torchvision import transforms as T
 from torchvision.models import resnet50
 from jfi import jaxm
-
-path = Path(__file__).parents[2].absolute() / "XPlane-ASL" / "src"
-if str(path) not in sys.path:
-    sys.path.append(str(path))
-
-from aslxplane.flight_control import dynamics
 
 ####################################################################################################
 
@@ -42,14 +35,21 @@ transform_eval = T.Compose(
 
 ####################################################################################################
 
+default_model_path = Path(__file__).absolute().parents[1] / "data" / "resnet50_model.pt"
 
-def get_model(pretrained: bool = True, device: torch.device | None = None):
+
+def get_model(
+    model_path: Path | str | None = None,
+    pretrained: bool = True,
+    device: torch.device | None = None,
+):
     model = resnet50(pretrained=False)
     model.fc = nn.Linear(model.fc.weight.shape[-1], 3)
     model.conv1 = nn.Sequential(nn.BatchNorm2d(3), model.conv1)
     model.to(DEVICE if device is None else device)
     if pretrained:
-        model.load_state_dict(torch.load(Path(__file__).parent / "resnet50_model.pt"))
+        model_path = default_model_path if model_path is None else Path(model_path)
+        model.load_state_dict(torch.load(model_path))
     model.eval()
     model = torch.compile(model)
     return model
@@ -99,40 +99,21 @@ def kalman_filter(
     ]
 
     # Kalman filter for (xp = f + fx x + fu u)
-    #xp = f + fx @ x0 + fu @ u0
     xp = f
     P = fx @ P @ fx.mT + 1e-5 * torch.eye(x0.shape[-1]).to(x0)
 
     S = H_obs @ P @ H_obs.mT + R
-    #K = P @ H_obs.mT @ torch.linalg.pinv(S)
+    # K = P @ H_obs.mT @ torch.linalg.pinv(S)
 
     xp_estimate = xp + P @ H_obs.mT @ torch.linalg.solve(S, z_obs - H_obs @ xp)
     P_estimate = (torch.eye(x0.shape[-1]).to(x0) - P @ H_obs.mT @ torch.linalg.solve(S, H_obs)) @ P
-    #P_estimate = P
 
     return xp_estimate, P_estimate
 
 
 ####################################################################################################
 
-default_dynamics_path = (
-    Path(__file__).absolute().parents[2]
-    / "XPlane-ASL"
-    / "notebooks"
-    / "data"
-    / "dynamics_new2.json"
-)
-
-
-# def get_dynamics_(dynamics_path: str | Path | None = None):
-#    params = {"pos_ref": jaxm.zeros(3), "ang_ref": jaxm.zeros(3)}
-#    dynamics_path = default_dynamics_path if dynamics_path is None else Path(dynamics_path)
-#    dynamics_state = json.loads(dynamics_path.read_text())
-#    fn = getattr(dynamics, "int_f_fx_fu_fn2")
-#    params.update({k: jaxm.array(v) for (k, v) in dynamics_state["params"].items()})
-#    return (lambda x, u, *args: fn(x, u, params)), params
-
-
+default_dynamics_path = Path(__file__).absolute().parents[1] / "data" / "dynamics.json"
 bmv = lambda A, x: (A @ x[..., None])[..., 0]
 
 
