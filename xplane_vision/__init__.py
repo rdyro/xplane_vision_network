@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+#import torch
+#try:
+#    torch.multiprocessing.set_start_method("spawn")
+#except RuntimeError:
+#    pass
+
 from typing import Callable
 from pathlib import Path
 import json
@@ -75,6 +81,7 @@ def forward(model: nn.Module, frame_or_frames: Tensor):
 
 H_obs_default = torch.cat([torch.diag(torch.ones(3)), torch.zeros((11 - 3, 3))], -2).mT
 P_default = torch.eye(11)
+R_default = torch.diag(torch.as_tensor([61.0, 109.0, 6.26]))
 
 
 def kalman_filter(
@@ -82,7 +89,7 @@ def kalman_filter(
     z_obs: Tensor,
     x0: Tensor,
     u0: Tensor,
-    R: Tensor,
+    R: Tensor | None = None,
     H_obs: Tensor | None = None,
     P: Tensor | None = None,
 ):
@@ -90,6 +97,7 @@ def kalman_filter(
     x0 = x0.to(torch.float64)
     u0 = u0.to(torch.float64)
     P = P_default.to(x0) if P is None else P.to(x0)
+    R = R_default.to(x0) if R is None else R.to(x0)
     H_obs = H_obs_default.to(x0) if H_obs is None else H_obs.to(x0)
     f, fx, fu = [
         torch.from_numpy(np.array(x)).to(x0)
@@ -139,7 +147,7 @@ def get_dynamics(dynamics_path: str | Path | None = None):
     params = {k: jaxm.array(v) for (k, v) in dynamics_data["params"].items()}
 
     @jaxm.jit
-    def dyn_fn(x, u):
+    def dyn_fn(x, u, params):
         assert x.ndim == u.ndim
         assert x.shape[-1] == 11
         assert u.shape[-1] == 4
@@ -154,4 +162,4 @@ def get_dynamics(dynamics_path: str | Path | None = None):
         fu = fu.reshape(org_shape + fu.shape[-2:])
         return f, fx, fu
 
-    return dyn_fn
+    return dyn_fn, params
